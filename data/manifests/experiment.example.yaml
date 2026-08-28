@@ -1,0 +1,24 @@
+schema_version: 1
+experiment_id: pmv2_query_only_smoke_v1
+dataset:
+  name: personamem_v2
+  revision: 0622e56
+  subset: smoke_v1
+  seed: 20260828
+  events_path: ../subsets/pmv2_smoke/events.jsonl
+  labels_path: ../labels/pmv2_smoke/labels.jsonl
+memory:
+  adapter: telemem
+  config_ref: ../../configs/memory/telemem.yaml
+attack:
+  family: query_only
+  variant: minja_inspired
+  budget: 3
+  target_policy: fixed_before_run
+evaluation:
+  top_k: [1, 3, 5, 10]
+  repeats: 5
+  judge_config: ../../configs/judges/default.yaml
+models:
+  assistant: replace-with-immutable-model-version
+  embedding: replace-with-immutable-model-version

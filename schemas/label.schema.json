@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/label.schema.json",
+  "title": "Private evaluation label",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["experiment_id", "persona_id", "evaluation_event_id", "answer_key"],
+  "properties": {
+    "experiment_id": {"type": "string", "minLength": 1},
+    "persona_id": {"type": "string", "minLength": 1},
+    "evaluation_event_id": {"type": "string", "minLength": 1},
+    "answer_key": {"type": "string"},
+    "rubric": {"type": "string"},
+    "incorrect_answers": {"type": "array", "items": {"type": "string"}},
+    "preference_type": {"type": "string"},
+    "metadata": {"type": "object"}
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/event.schema.json",
+  "title": "Canonical memory experiment event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "experiment_id", "persona_id", "session_id", "event_id", "sequence",
+    "timestamp", "role", "content", "content_type", "topic", "split",
+    "source_dataset", "source_record_id", "allowed_for_memory"
+  ],
+  "properties": {
+    "experiment_id": {"type": "string", "minLength": 1},
+    "persona_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "event_id": {"type": "string", "minLength": 1},
+    "sequence": {"type": "integer", "minimum": 0},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "role": {"enum": ["user", "assistant", "system", "tool"]},
+    "content": {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "array", "items": {"type": "object"}}
+      ]
+    },
+    "content_type": {"enum": ["text", "image", "multimodal"]},
+    "topic": {"type": "string"},
+    "split": {
+      "enum": [
+        "benign_ingestion", "pre_attack_probe", "attack_insertion",
+        "delay_noise", "victim_probe", "recovery_probe", "unrelated_control_probe"
+      ]
+    },
+    "source_dataset": {"enum": ["personamem_v1", "personamem_v2", "synthetic"]},
+    "source_record_id": {"type": "string", "minLength": 1},
+    "allowed_for_memory": {"type": "boolean"},
+    "operation": {"enum": ["message", "forget"], "default": "message"},
+    "refers_to_event_id": {"type": "string", "minLength": 1},
+    "supersedes_event_id": {"type": "string", "minLength": 1}
+  }
+}
