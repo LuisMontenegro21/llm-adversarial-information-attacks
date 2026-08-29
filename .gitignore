@@ -158,7 +158,6 @@ env.bak/
 venv.bak/
 
 /data/locomo/locomo10.json
-/planning
 # Spyder project settings
 .spyderproject
 .spyproject
