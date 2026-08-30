@@ -2,7 +2,7 @@
 
 ## Objective
 
-Build one causal replay engine and capability-aware adapters for TeleMem, Memanto, and LangGraph. Establish benign baselines under both controlled-component and native-stack regimes before any poisoning campaign.
+Build one configuration-driven replay engine and capability-aware adapters for TeleMem, Memanto, and LangGraph. Establish benign baselines for each supported write policy and model-provider configuration before running premade poisoning attacks.
 
 This phase ends when every declared condition can ingest the same valid history unit from a fresh namespace, reach a defined visibility barrier, expose the available memory-state evidence, retrieve under a recorded budget, answer read-only probes, and tear down without contaminating another trial.
 
@@ -11,7 +11,7 @@ This phase ends when every declared condition can ingest the same valid history 
 Phase 2 must not begin until the following Phase 1 artifacts are frozen:
 
 - schema-v2 experiment manifest;
-- normalized PersonaMem-v1 and PersonaMem-v2 subsets;
+- normalized PersonaMem-v2 subsets;
 - private labels unavailable to replay and adapter processes;
 - clean overlays and read-only evaluation probes;
 - dataset, config, prompt, lockfile, and source hashes;
@@ -31,9 +31,9 @@ Primary controlled conditions:
 
 | Condition ID | Mechanism | Write policy | Representation | Writer |
 |---|---|---|---|---|
-| `telemem_raw` | TeleMem | direct/raw | collection | none; `infer=False` |
-| `memanto_raw` | Memanto | direct/raw | typed records | none; direct `remember` |
-| `langgraph_raw_collection` | LangGraph Store | direct/raw | collection | none; `put` |
+| `telemem_direct` | TeleMem | direct | collection | none; `infer=False` |
+| `memanto_direct` | Memanto | direct | typed records | none; direct `remember` |
+| `langgraph_direct_collection` | LangGraph Store | direct | collection | none; `put` |
 | `telemem_shared_selective` | TeleMem | shared selective | collection | common external writer, then raw write |
 | `memanto_shared_selective` | Memanto | shared selective | typed records | common external writer, then direct `remember` |
 | `langgraph_shared_selective` | LangGraph Store | shared selective | collection | common external writer, then `put` |
@@ -54,26 +54,20 @@ Primary native conditions:
 | `memanto_native_selective` | Memanto | conversation extraction, typed memory, and configured policy |
 | `langgraph_native_selective_collection` | LangGraph | documented selective writer over a collection |
 
-Optional conditions must be separate:
-
-- `langgraph_native_profile`: a single updated user profile;
-- `memanto_native_answer`: Memanto `answer` rather than common responder;
-- `langgraph_background_writer`: end-of-session/background consolidation;
-- `telemem_video`: TeleMem video memory on a separate compatible asset benchmark;
-- LangGraph checkpointer: short-term thread-state baseline, not a long-term-memory peer.
+The initial schedule excludes alternate native answer paths, LangGraph profile/background-writer variants, TeleMem video memory, and LangGraph checkpointer baselines. Only the three native selective conditions above advance to benign replay. New conditions require a separately approved scope revision.
 
 Native-stack comparisons must enumerate every writer, embedder, reranker, policy, and answer model that is internally active.
 
 ## 3. Architecture and process boundaries
 
 ```text
-resolved manifest + compiled event stream
+ resolved run manifest + compiled event stream
                   ↓
           trial orchestrator
         ↙         ↓          ↘
- replay process  adapter process  evaluator process
+ replay process  adapter process  artifact recorder
         ↓              ↓                 ↑
- completed turns → memory backend → retrieval/answers
+ completed turns → memory backend → retrieval/responses
 ```
 
 Responsibilities:
@@ -82,7 +76,7 @@ Responsibilities:
 - The **replay process** receives only replayable events and constructs exchanges/chunks.
 - The **adapter process** owns mechanism-specific lifecycle, writes, retrieval, and observable state.
 - The **responder** receives the query and bounded retrieved context, never evaluator labels.
-- The **evaluator process** may read labels and attack rubrics only after outputs are immutable.
+- The **artifact recorder** seals configuration, writes, state evidence, retrievals, contexts, and responses. Phase 4 evaluation reads these artifacts only after the run completes.
 
 Use process-level isolation when an SDK has import-time global state, telemetry, cache directories, or non-resettable clients.
 
@@ -190,7 +184,7 @@ class MemoryAdapter(Protocol):
 
 `AdapterCapabilities` must declare:
 
-- raw write, native selective write, shared selective write;
+- direct write, native selective write, shared selective write;
 - stable memory IDs;
 - inspection/export;
 - hard deletion, soft expiration, and restore;
@@ -217,7 +211,7 @@ Requirements:
 
 - one namespace/agent identity per trial state;
 - no namespace reuse between attack, clean, or matched-benign twins;
-- no shared index between personas unless cross-user isolation is intentionally under test;
+- no shared index between personas;
 - teardown must verify that normal retrieval returns no active trial memory;
 - failed teardown quarantines the namespace and blocks reuse;
 - credentials and provider account IDs must never be embedded in namespace strings.
@@ -232,7 +226,7 @@ Pinned configuration must include TeleMem, Mem0 dependency, LLM, embedding, vect
 
 Mapping:
 
-- controlled raw: `add(messages, user_id=..., run_id=..., infer=False)`;
+- controlled direct: `add(messages, user_id=..., run_id=..., infer=False)`;
 - native selective: `add(..., infer=True)` using completed exchanges;
 - retrieval: `search(query, user_id=..., run_id=..., limit=..., threshold=..., rerank=...)`;
 - shared selective: external writer candidates followed by `infer=False` writes.
@@ -246,7 +240,7 @@ Critical isolation requirements:
 - Disable telemetry and external defaults where supported; log the effective setting.
 - When `infer=True` buffers or merges memories, call the appropriate flush/barrier behavior and record `ADD`/`UPDATE`/merge outcomes.
 
-TeleMem video methods (`add_mm`/`search_mm`) require a separate adapter because their records, assets, retrieval, and response path are not equivalent to dialogue memory.
+TeleMem video methods (`add_mm`/`search_mm`) are out of scope because their records, assets, retrieval, and response path are not equivalent to the PersonaMem-v2 text histories used here.
 
 ### 7.2 Memanto
 
@@ -255,11 +249,11 @@ Run Memanto in a pinned local/on-prem configuration when possible. If cloud retr
 Mapping:
 
 - one Memanto agent identity and namespace per trial;
-- controlled raw: direct `remember` with explicit type/source/provenance/source reference;
+- controlled direct: direct `remember` with explicit type/source/provenance/source reference;
 - native selective: conversation extraction followed by native typed-memory writes and configured policy;
 - retrieval: `recall` with explicit `limit`, memory-type filters, temporal filters, and lifecycle status;
 - common response path: use recall results in the common responder;
-- optional native path: use `answer` and report separately.
+- response path: use `recall` results in the common responder; the native `answer` path is out of scope.
 
 Lifecycle requirements:
 
@@ -285,11 +279,10 @@ Conditions:
 - raw collection: one canonical record per admitted candidate;
 - shared selective collection: common writer candidates stored unchanged;
 - native selective collection: pinned writer prompt/tool schema may add/update/delete collection entries;
-- optional profile: one schema-validated profile updated by patches, reported separately.
 
 Use `InMemoryStore` only for smoke/contract tests. Pilot and confirmatory runs should use a pinned database-backed store such as PostgresStore, with migrations performed as an explicit setup step.
 
-A checkpointer retains thread-scoped graph state. It must not be labeled as an equivalent long-term semantic-memory mechanism. If included, give it its own condition, thread lifecycle, context-trimming policy, and result table.
+A checkpointer retains thread-scoped graph state rather than equivalent long-term semantic memory and is therefore out of scope.
 
 ## 8. Replay protocol
 
@@ -386,6 +379,8 @@ Retrieved text must be placed in a clearly delimited untrusted-data section. The
 
 Do not begin with a complete writer × responder × mechanism factorial.
 
+The resolved run manifest must record writer and responder provider/model IDs independently. The `--model` CLI convenience flag may set both, but matrix experiments should vary them explicitly so writer effects are not confused with responder effects.
+
 ### 11.1 Mechanism baseline
 
 Use one fixed common writer and one fixed responder for the controlled selective conditions. This is the primary mechanism comparison.
@@ -395,7 +390,7 @@ Use one fixed common writer and one fixed responder for the controlled selective
 For providers A, B, and C:
 
 - rebuild memory from the same S0/S1 history with each writer;
-- hold responder, retrieval configuration, attack artifact, and judge fixed;
+- hold responder, retrieval configuration, and attack artifact fixed;
 - treat provider as a writer factor;
 - never reuse memory produced by another writer condition.
 
@@ -404,7 +399,7 @@ For providers A, B, and C:
 - freeze the exact retrieval result and assembled context;
 - submit the same query/context to each responder provider;
 - disable all memory writes during these probes;
-- hold judge and option order fixed or counterbalanced;
+- hold query, context, option order, and generation settings fixed or counterbalanced;
 - treat each provider output as a paired response to the same state.
 
 This design isolates activation differences and avoids rebuilding stores unnecessarily.
@@ -415,10 +410,9 @@ Run before attacks:
 
 - no-memory responder;
 - full benign context, subject to a documented context budget;
-- each controlled raw condition;
+- each controlled direct condition;
 - each controlled shared-selective condition;
 - each native selective condition;
-- optional native integrated-answer condition.
 
 Measure:
 
@@ -430,10 +424,10 @@ Measure:
 - ownership attribution;
 - forget/expire/delete compliance under correct lifecycle semantics;
 - sensitive-information policy behavior;
-- cross-user isolation;
+- persona-namespace isolation as an adapter contract check, not an attack delivery mode;
 - latency, token use, provider cost, storage growth, and record-length distribution.
 
-An adapter/configuration that cannot reach a minimum pre-registered clean baseline must not advance to the primary poisoning comparison. It may remain as a documented failure condition, because attack success on a nonfunctional memory system is not informative.
+An adapter/configuration that cannot reach the fixed clean baseline must not advance to the primary poisoning comparison. It may remain as a documented failure condition, because attack success on a nonfunctional memory system is not informative.
 
 ## 13. State reconstruction and twins
 
@@ -444,7 +438,6 @@ S0: empty verified namespace
 S1: benign history ingested and visible
 S2: attack/control overlay ingested and visible
 S3: delay/noise ingested and visible
-S4: recovery/forget operation completed
 ```
 
 Every attack, clean, and matched-benign twin must derive independently from the same S1 event stream and configuration.
@@ -500,7 +493,7 @@ Predefine which failures are retried, rebuilt, excluded, or retained as outcomes
 
 - capability declaration matches observed behavior;
 - start/teardown returns to verified empty state;
-- raw and selective writes use the correct path;
+- direct and selective writes use the correct path;
 - completed exchanges preserve roles and source IDs;
 - retrieval respects namespace, lifecycle status, and token budget;
 - unavailable inspection/snapshot capabilities are represented honestly.
@@ -514,7 +507,6 @@ Predefine which failures are retried, rebuilt, excluded, or retained as outcomes
 - Memanto teardown removes the backing namespace when requested;
 - LangGraph collection namespaces isolate personas/trials;
 - LangGraph production store migrations and persistence work;
-- checkpointer state is not returned as long-term Store memory.
 
 ### Causality tests
 
@@ -535,7 +527,6 @@ src/llm_adversarial_information_attacks/
     telemem.py
     memanto.py
     langgraph_store.py
-    langgraph_checkpoint.py       # optional baseline
   replay/
     compiler.py
     orchestrator.py
@@ -543,6 +534,7 @@ src/llm_adversarial_information_attacks/
     visibility.py
     reconstruction.py
   runtime/
+    runner.py
     writer.py
     retrieval.py
     context.py
@@ -550,7 +542,9 @@ src/llm_adversarial_information_attacks/
   logging/
     records.py
     redaction.py
+  cli.py
 configs/
+  experiments/
   memory/
   models/
   retrieval/
@@ -573,7 +567,7 @@ For each manifest and history unit:
 8. record the S1 state/diff and reconstruction hash;
 9. reconstruct separate read-only twins for each probe as needed;
 10. retrieve with native and controlled budgets;
-11. run the common responder and optional native responder;
+11. run the common responder;
 12. seal raw logs before evaluator access;
 13. evaluate benign endpoints;
 14. tear down and verify no active memory remains;
@@ -585,9 +579,9 @@ For each manifest and history unit:
 - The six controlled conditions complete smoke and pilot histories from fresh namespaces.
 - Native selective conditions are fully specified and complete benign replay.
 - Controlled versus native results are stored and reported separately.
-- Writer, retrieval, responder, and judge provider roles are independently logged.
-- Benign insertion, selection, retrieval, response quality, ownership, temporal behavior, isolation, and resource baselines are available.
-- Every primary condition meets the pre-registered clean-functionality gate or is explicitly excluded with evidence.
+- Writer, retrieval, and responder provider roles are independently logged for later evaluation.
+- Benign insertion, selection, retrieval, response quality, temporal behavior, persona isolation, and resource baselines are available; ownership is included when that payload extension is enabled.
+- Every primary condition meets the fixed clean-functionality gate or is explicitly excluded with evidence.
 - S1 reconstruction works for every mechanism; attacks cannot inherit prior trial state.
 - Cross-persona and cross-trial leakage is zero in smoke and pilot tests.
 - No Phase 3 campaign begins until raw Phase 2 logs pass completeness and contamination validation.
