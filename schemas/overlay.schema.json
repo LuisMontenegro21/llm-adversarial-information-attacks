@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/overlay.schema.json",
+  "title": "Immutable PersonaMem-v2 experiment overlay",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "overlay_id", "attack_set", "overlay_type",
+    "history_unit_id", "persona_id", "insert_after_event_id", "delivery",
+    "payload", "attacker_knowledge", "events", "budget", "target",
+    "matched_benign_overlay_id"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "overlay_id": {"type": "string", "minLength": 1},
+    "attack_set": {"type": "string", "minLength": 1},
+    "overlay_type": {"enum": ["clean", "matched_benign", "malicious"]},
+    "history_unit_id": {"type": "string", "pattern": "^pmv2-"},
+    "persona_id": {"type": "string", "pattern": "^pmv2-p"},
+    "insert_after_event_id": {"type": ["string", "null"]},
+    "delivery": {"enum": ["direct_api", "conversation"]},
+    "payload": {"enum": ["preference_inversion", "ownership_confusion"]},
+    "attacker_knowledge": {"enum": ["black_box", "white_box"]},
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["overlay_event_id", "role", "content", "template_id"],
+        "properties": {
+          "overlay_event_id": {"type": "string", "minLength": 1},
+          "role": {"enum": ["user", "assistant", "system", "tool"]},
+          "content": {"type": "string"},
+          "template_id": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "value", "maximum_tokens"],
+      "properties": {
+        "unit": {"enum": ["record", "interaction"]},
+        "value": {"type": "integer", "minimum": 0},
+        "maximum_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query_event_id", "goal_id", "false_preference"],
+      "properties": {
+        "query_event_id": {"type": "string", "minLength": 1},
+        "goal_id": {"type": "string", "minLength": 1},
+        "false_preference": {"type": "string"}
+      }
+    },
+    "matched_benign_overlay_id": {"type": ["string", "null"]}
+  }
+}

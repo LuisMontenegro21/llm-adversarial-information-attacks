@@ -1,41 +1,60 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/schemas/event.schema.json",
-  "title": "Canonical memory experiment event",
+  "title": "PersonaMem-v2 canonical history event",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "experiment_id", "persona_id", "session_id", "event_id", "sequence",
-    "timestamp", "role", "content", "content_type", "topic", "split",
-    "source_dataset", "source_record_id", "allowed_for_memory"
+    "schema_version", "history_unit_id", "persona_id", "conversation_id",
+    "turn_id", "event_id", "sequence", "timestamp", "timestamp_is_synthetic",
+    "role", "content", "content_type", "source_topic", "experimental_topic",
+    "split", "source_dataset", "source_revision", "source_record_id",
+    "source_event_index", "source_origin", "allowed_for_memory", "operation",
+    "refers_to_event_id", "supersedes_event_id", "overlay_id", "overlay_event_id"
   ],
   "properties": {
-    "experiment_id": {"type": "string", "minLength": 1},
-    "persona_id": {"type": "string", "minLength": 1},
-    "session_id": {"type": "string", "minLength": 1},
+    "schema_version": {"const": 2},
+    "history_unit_id": {"type": "string", "pattern": "^pmv2-", "minLength": 6},
+    "persona_id": {"type": "string", "pattern": "^pmv2-p", "minLength": 7},
+    "conversation_id": {"type": "string", "minLength": 1},
+    "turn_id": {"type": "string", "minLength": 1},
     "event_id": {"type": "string", "minLength": 1},
     "sequence": {"type": "integer", "minimum": 0},
     "timestamp": {"type": "string", "format": "date-time"},
+    "timestamp_is_synthetic": {"type": "boolean"},
     "role": {"enum": ["user", "assistant", "system", "tool"]},
     "content": {
-      "oneOf": [
-        {"type": "string"},
-        {"type": "array", "items": {"type": "object"}}
-      ]
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "text"],
+        "properties": {
+          "type": {"const": "text"},
+          "text": {"type": "string"}
+        }
+      }
     },
-    "content_type": {"enum": ["text", "image", "multimodal"]},
-    "topic": {"type": "string"},
+    "content_type": {"const": "text"},
+    "source_topic": {"type": ["string", "null"]},
+    "experimental_topic": {"type": ["string", "null"]},
     "split": {
       "enum": [
-        "benign_ingestion", "pre_attack_probe", "attack_insertion",
-        "delay_noise", "victim_probe", "recovery_probe", "unrelated_control_probe"
+        "benign_ingestion", "control_insertion", "attack_insertion",
+        "delay_noise", "victim_probe", "unrelated_control_probe"
       ]
     },
-    "source_dataset": {"enum": ["personamem_v1", "personamem_v2", "synthetic"]},
+    "source_dataset": {"const": "personamem_v2"},
+    "source_revision": {"type": "string", "minLength": 7},
     "source_record_id": {"type": "string", "minLength": 1},
+    "source_event_index": {"type": "integer", "minimum": 0},
+    "source_origin": {"enum": ["dataset", "overlay"]},
     "allowed_for_memory": {"type": "boolean"},
-    "operation": {"enum": ["message", "forget"], "default": "message"},
-    "refers_to_event_id": {"type": "string", "minLength": 1},
-    "supersedes_event_id": {"type": "string", "minLength": 1}
+    "operation": {"enum": ["message", "forget"]},
+    "refers_to_event_id": {"type": ["string", "null"]},
+    "supersedes_event_id": {"type": ["string", "null"]},
+    "overlay_id": {"type": ["string", "null"]},
+    "overlay_event_id": {"type": ["string", "null"]}
   }
 }

@@ -18,7 +18,7 @@ def select_personas(
     all_personas: set[str] = set()
     for label in labels:
         persona = str(label["persona_id"])
-        stratum = str(label.get("preference_type") or "unclassified")
+        stratum = str(label.get("strata", {}).get("preference_type") or "unclassified")
         strata[stratum].add(persona)
         all_personas.add(persona)
     if count > len(all_personas):
@@ -53,9 +53,9 @@ def filter_records(
     subset_events = [event for event in events if event["persona_id"] in selected]
     subset_labels = [label for label in labels if label["persona_id"] in selected]
     subset_events.sort(
-        key=lambda item: (item["experiment_id"], item["sequence"], item["event_id"])
+        key=lambda item: (item["history_unit_id"], item["sequence"], item["event_id"])
     )
     subset_labels.sort(
-        key=lambda item: (item["experiment_id"], item["evaluation_event_id"])
+        key=lambda item: (item["history_unit_id"], item["evaluation_event_id"])
     )
     return subset_events, subset_labels

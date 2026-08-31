@@ -1,9 +1,4 @@
-"""Normalizers for local PersonaMem exports.
-
-Each benchmark question becomes an independent experiment. This deliberately
-duplicates shared histories: it makes the temporal cutoff explicit and prevents
-one evaluation probe from changing the state observed by another.
-"""
+"""Normalize local PersonaMem-v2 text exports into independent history units."""
 
 from __future__ import annotations
 
@@ -13,11 +8,12 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from .models import EvaluationLabel, Event
+from .models import EvaluationLabel, Event, Role
 
 _BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
+_ROLES = {"user", "assistant", "system", "tool"}
 
 
 def _identifier(value: Any) -> str:
@@ -29,11 +25,29 @@ def _identifier(value: Any) -> str:
     return safe.strip("-") or hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
-def _timestamp(sequence: int) -> str:
+def _stable_record_id(row: dict[str, str]) -> str:
+    explicit = row.get("source_record_id") or row.get("question_id")
+    if explicit:
+        return _identifier(explicit)
+    identity = {
+        "persona_id": row.get("persona_id"),
+        "chat_history_32k_link": row.get("chat_history_32k_link"),
+        "user_query": row.get("user_query"),
+        "correct_answer": row.get("correct_answer"),
+        "topic_query": row.get("topic_query"),
+        "preference": row.get("preference"),
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()[:16]
+    return f"q-{digest}"
+
+
+def synthetic_timestamp(sequence: int) -> str:
     return (_BASE_TIME + timedelta(seconds=sequence)).isoformat().replace("+00:00", "Z")
 
 
-def _message(value: Any) -> dict[str, Any]:
+def parse_message(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     if not isinstance(value, str):
@@ -48,185 +62,201 @@ def _message(value: Any) -> dict[str, Any]:
     return {"role": "user", "content": value}
 
 
-def _content_type(content: Any) -> str:
+def text_blocks(content: Any) -> list[dict[str, str]]:
+    """Return canonical text blocks and reject PersonaMem-v2 multimodal data."""
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
     if isinstance(content, list):
-        types = {
-            str(item.get("type", "text")) for item in content if isinstance(item, dict)
-        }
-        return "image" if types == {"image"} else "multimodal"
-    return "text"
+        blocks: list[dict[str, str]] = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type", "text") != "text":
+                raise ValueError("only PersonaMem-v2 text content is in scope")
+            text = block.get("text", block.get("content"))
+            if not isinstance(text, str):
+                raise TypeError("text content blocks require a string text field")
+            blocks.append({"type": "text", "text": text})
+        return blocks
+    raise TypeError("message content must be a string or a list of text blocks")
 
 
-def _events_and_label(
-    *,
-    experiment_id: str,
-    persona_id: str,
-    source_dataset: str,
-    source_record_id: str,
-    topic: str,
-    history: list[dict[str, Any]],
-    query: dict[str, Any],
-    answer_key: str,
-    incorrect_answers: list[str] | None = None,
-    preference_type: str | None = None,
-) -> tuple[list[Event], EvaluationLabel]:
-    events: list[Event] = []
-    for sequence, raw_message in enumerate(history):
-        content = raw_message.get("content", "")
-        events.append(
-            Event(
-                experiment_id=experiment_id,
-                persona_id=persona_id,
-                session_id=f"{experiment_id}-history",
-                event_id=f"{experiment_id}-e{sequence:06d}",
-                sequence=sequence,
-                timestamp=_timestamp(sequence),
-                role=raw_message.get("role", "user"),
-                content=content,
-                content_type=_content_type(content),
-                topic=topic,
-                split="benign_ingestion",
-                source_dataset=source_dataset,
-                source_record_id=source_record_id,
-                allowed_for_memory=True,
-            )
-        )
-
-    sequence = len(events)
-    evaluation_event_id = f"{experiment_id}-e{sequence:06d}"
-    query_content = query.get("content", "")
-    events.append(
-        Event(
-            experiment_id=experiment_id,
-            persona_id=persona_id,
-            session_id=f"{experiment_id}-evaluation",
-            event_id=evaluation_event_id,
-            sequence=sequence,
-            timestamp=_timestamp(sequence),
-            role=query.get("role", "user"),
-            content=query_content,
-            content_type=_content_type(query_content),
-            topic=topic,
-            split="victim_probe",
-            source_dataset=source_dataset,
-            source_record_id=source_record_id,
-            allowed_for_memory=False,
-        )
-    )
-    label = EvaluationLabel(
-        experiment_id=experiment_id,
-        persona_id=persona_id,
-        evaluation_event_id=evaluation_event_id,
-        answer_key=str(answer_key),
-        incorrect_answers=incorrect_answers or [],
-        preference_type=preference_type,
-    )
-    return events, label
+def _role(value: Any) -> Role:
+    role = str(value or "user").lower()
+    if role not in _ROLES:
+        raise ValueError(f"unsupported message role: {role!r}")
+    return cast(Role, role)
 
 
-def load_v1_contexts(path: str | Path) -> dict[str, list[dict[str, Any]]]:
-    contexts: dict[str, list[dict[str, Any]]] = {}
-    with Path(path).open(encoding="utf-8") as handle:
-        for line in handle:
-            row = json.loads(line)
-            context_id = row.get("shared_context_id", row.get("id"))
-            context = row.get("context", row.get("messages", row.get("conversations")))
-            if context_id is None and len(row) == 1:
-                context_id, context = next(iter(row.items()))
-            if context_id is None or not isinstance(context, list):
-                raise ValueError(
-                    "v1 context rows need an id and a context/messages list"
-                )
-            contexts[str(context_id)] = context
-    return contexts
-
-
-def normalize_v1(
-    questions_csv: str | Path, contexts_jsonl: str | Path
-) -> tuple[list[Event], list[EvaluationLabel]]:
-    contexts = load_v1_contexts(contexts_jsonl)
-    events: list[Event] = []
-    labels: list[EvaluationLabel] = []
-    with Path(questions_csv).open(encoding="utf-8-sig", newline="") as handle:
-        for row in csv.DictReader(handle):
-            persona_id = f"pmv1-{_identifier(row['persona_id'])}"
-            record_id = _identifier(row["question_id"])
-            experiment_id = f"pmv1-{record_id}"
-            context = contexts[str(row["shared_context_id"])]
-            cutoff = int(row["end_index_in_shared_context"])
-            scenario_events, label = _events_and_label(
-                experiment_id=experiment_id,
-                persona_id=persona_id,
-                source_dataset="personamem_v1",
-                source_record_id=record_id,
-                topic=row.get("topic", "unknown"),
-                history=context[:cutoff],
-                query=_message(row["user_question_or_message"]),
-                answer_key=row["correct_answer"],
-                incorrect_answers=_parse_options(
-                    row.get("all_options", ""), row["correct_answer"]
-                ),
-                preference_type=row.get("question_type") or None,
-            )
-            events.extend(scenario_events)
-            labels.append(label)
-    return events, labels
-
-
-def _parse_options(value: str, answer: str) -> list[str]:
+def _parse_list(value: str | None) -> list[str]:
     if not value:
         return []
-    try:
-        options = ast.literal_eval(value)
-    except (ValueError, SyntaxError):
-        return []
-    return (
-        [str(option) for option in options if str(option) != str(answer)]
-        if isinstance(options, list)
-        else []
-    )
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            parsed = parser(value)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed]
+        except (ValueError, SyntaxError, json.JSONDecodeError):
+            pass
+    return []
+
+
+def _history_path(root: Path, link: str) -> Path:
+    normalized = Path(link.replace("\\", "/"))
+    candidates = (root / normalized, root / normalized.name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"history file not found below {root}: {link}")
+
+
+def _load_history(path: Path) -> list[dict[str, Any]]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(data, dict):
+        data = data.get("conversations", data.get("messages"))
+    if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+        raise TypeError(f"{path}: history must be a list of message objects")
+    return data
+
+
+def _conversation_and_turn(
+    message: dict[str, Any],
+    *,
+    history_unit_id: str,
+    sequence: int,
+    current_turn: int,
+) -> tuple[str, int, str]:
+    conversation = message.get("conversation_id") or message.get("session_id")
+    conversation_id = _identifier(conversation or f"{history_unit_id}-history")
+    if _role(message.get("role")) == "user" or sequence == 0:
+        current_turn += 1
+    raw_turn = message.get("turn_id")
+    turn_id = _identifier(raw_turn or f"{conversation_id}-turn-{current_turn:06d}")
+    return conversation_id, current_turn, turn_id
 
 
 def normalize_v2(
-    benchmark_csv: str | Path, histories_root: str | Path, size: str = "32k"
+    benchmark_csv: str | Path,
+    histories_root: str | Path,
+    *,
+    source_revision: str,
+    size: str = "32k",
 ) -> tuple[list[Event], list[EvaluationLabel]]:
+    """Normalize one independent history unit per PersonaMem-v2 benchmark row."""
+    if not source_revision.strip():
+        raise ValueError("source_revision must be an immutable dataset revision")
     root = Path(histories_root)
     events: list[Event] = []
     labels: list[EvaluationLabel] = []
     link_column = f"chat_history_{size}_link"
+
     with Path(benchmark_csv).open(encoding="utf-8-sig", newline="") as handle:
-        for row_number, row in enumerate(csv.DictReader(handle)):
-            record_id = _identifier(
-                row.get("source_record_id") or f"{row['persona_id']}-{row_number}"
-            )
-            experiment_id = f"pmv2-{record_id}"
-            persona_id = f"pmv2-{_identifier(row['persona_id'])}"
+        reader = csv.DictReader(handle)
+        required = {"persona_id", "user_query", "correct_answer"}
+        missing = required.difference(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"benchmark CSV is missing columns: {sorted(missing)}")
+
+        for row_number, row in enumerate(reader, start=2):
+            source_record_id = _stable_record_id(row)
+            history_unit_id = f"pmv2-{source_record_id}"
+            persona_id = f"pmv2-p{_identifier(row['persona_id'])}"
             link = row.get(link_column) or row.get("chat_history_link")
             if not link:
-                raise ValueError(f"row {row_number + 2}: missing {link_column}")
-            history_data = json.loads(
-                (root / Path(link).name).read_text(encoding="utf-8")
-            )
-            if isinstance(history_data, dict):
-                history_data = history_data.get(
-                    "conversations", history_data.get("messages")
+                raise ValueError(f"row {row_number}: missing {link_column}")
+            history = _load_history(_history_path(root, link))
+
+            current_turn = -1
+            scenario: list[Event] = []
+            for sequence, message in enumerate(history):
+                conversation_id, current_turn, turn_id = _conversation_and_turn(
+                    message,
+                    history_unit_id=history_unit_id,
+                    sequence=sequence,
+                    current_turn=current_turn,
                 )
-            if not isinstance(history_data, list):
-                raise TypeError(f"row {row_number + 2}: history must be a message list")
-            scenario_events, label = _events_and_label(
-                experiment_id=experiment_id,
-                persona_id=persona_id,
-                source_dataset="personamem_v2",
-                source_record_id=record_id,
-                topic=row.get("topic_query", "unknown"),
-                history=history_data,
-                query=_message(row["user_query"]),
-                answer_key=row["correct_answer"],
-                incorrect_answers=_parse_options(
-                    row.get("incorrect_answers", ""), row["correct_answer"]
-                ),
-                preference_type=row.get("pref_type") or None,
+                scenario.append(
+                    Event(
+                        schema_version=2,
+                        history_unit_id=history_unit_id,
+                        persona_id=persona_id,
+                        conversation_id=conversation_id,
+                        turn_id=turn_id,
+                        event_id=f"{history_unit_id}-e{sequence:06d}",
+                        sequence=sequence,
+                        timestamp=synthetic_timestamp(sequence),
+                        timestamp_is_synthetic=True,
+                        role=_role(message.get("role")),
+                        content=text_blocks(message.get("content", "")),
+                        content_type="text",
+                        source_topic=str(message["topic"])
+                        if message.get("topic")
+                        else None,
+                        experimental_topic=None,
+                        split="benign_ingestion",
+                        source_dataset="personamem_v2",
+                        source_revision=source_revision,
+                        source_record_id=f"{link}#{sequence}",
+                        source_event_index=sequence,
+                        source_origin="dataset",
+                        allowed_for_memory=True,
+                    )
+                )
+
+            query = parse_message(row["user_query"])
+            query_sequence = len(scenario)
+            evaluation_event_id = f"{history_unit_id}-eval"
+            scenario.append(
+                Event(
+                    schema_version=2,
+                    history_unit_id=history_unit_id,
+                    persona_id=persona_id,
+                    conversation_id=f"{history_unit_id}-evaluation",
+                    turn_id=f"{history_unit_id}-evaluation-turn",
+                    event_id=evaluation_event_id,
+                    sequence=query_sequence,
+                    timestamp=synthetic_timestamp(query_sequence),
+                    timestamp_is_synthetic=True,
+                    role=_role(query.get("role")),
+                    content=text_blocks(query.get("content", "")),
+                    content_type="text",
+                    source_topic=None,
+                    experimental_topic=row.get("topic_query") or None,
+                    split="victim_probe",
+                    source_dataset="personamem_v2",
+                    source_revision=source_revision,
+                    source_record_id=source_record_id,
+                    source_event_index=query_sequence,
+                    source_origin="dataset",
+                    allowed_for_memory=False,
+                )
             )
-            events.extend(scenario_events)
-            labels.append(label)
+            incorrect = [
+                option
+                for option in _parse_list(row.get("incorrect_answers"))
+                if option != row["correct_answer"]
+            ]
+            labels.append(
+                EvaluationLabel(
+                    schema_version=2,
+                    history_unit_id=history_unit_id,
+                    persona_id=persona_id,
+                    evaluation_event_id=evaluation_event_id,
+                    answer_key=row["correct_answer"],
+                    incorrect_answers=incorrect,
+                    strata={
+                        "preference_type": row.get("pref_type") or "unclassified",
+                        "topic": row.get("topic_query") or "unknown",
+                        "owner": row.get("who") or "unknown",
+                        "updated": _optional_bool(row.get("updated")),
+                        "sensitive": _optional_bool(row.get("sensitive_info")),
+                    },
+                    source_record_id=source_record_id,
+                )
+            )
+            events.extend(scenario)
     return events, labels
+
+
+def _optional_bool(value: str | None) -> bool | None:
+    if value is None or value == "":
+        return None
+    return str(value).strip().lower() in {"1", "true", "yes"}

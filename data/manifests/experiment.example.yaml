@@ -1,24 +1,54 @@
-schema_version: 1
-experiment_id: pmv2_query_only_smoke_v1
+schema_version: 2
+experiment_id: pmv2-direct-smoke-v1
 dataset:
   name: personamem_v2
-  revision: 0622e56
+  revision: replace-with-full-immutable-revision
   subset: smoke_v1
-  seed: 20260828
   events_path: ../subsets/pmv2_smoke/events.jsonl
   labels_path: ../labels/pmv2_smoke/labels.jsonl
-memory:
-  adapter: telemem
+  subset_seed: 20260829
+condition:
+  comparison_regime: controlled_component
+  mechanism: telemem
+  package_version: 1.10.0
+  backend: local
+  write_policy: direct
+  representation: collection
+  update_timing: hot_path
   config_ref: ../../configs/memory/telemem.yaml
-attack:
-  family: query_only
-  variant: minja_inspired
-  budget: 3
-  target_policy: fixed_before_run
-evaluation:
-  top_k: [1, 3, 5, 10]
-  repeats: 5
-  judge_config: ../../configs/judges/default.yaml
+retrieval:
+  mode: native_semantic
+  candidate_k: 10
+  returned_k: [1, 3, 5]
+  context_token_budget: 2048
+  threshold: null
+  rerank: false
 models:
-  assistant: replace-with-immutable-model-version
-  embedding: replace-with-immutable-model-version
+  writer: null
+  responder:
+    provider: openai
+    model: replace-with-immutable-model-id
+    config_ref: null
+  embedding:
+    provider: openai
+    model: text-embedding-3-small
+    config_ref: null
+  reranker: null
+attack:
+  overlay_registry: ../../attacks/registry/smoke.yaml
+  delivery: direct_api
+  payload: preference_inversion
+  attacker_knowledge: white_box
+  attack_set: pmv2_preference_inversion_v1
+  budget: {unit: record, value: 1}
+  target_policy: fixed_before_run
+controls:
+  paired_clean_twin: true
+  matched_benign_overlay: true
+  no_memory_baseline: true
+  full_context_baseline: true
+replication:
+  trial_order_seed: 20260829
+  option_order_seed: 20260830
+  generation_replicates: 1
+  fail_fast: true

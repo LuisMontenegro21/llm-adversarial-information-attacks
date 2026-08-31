@@ -1,64 +1,136 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/schemas/experiment.schema.json",
-  "title": "Memory poisoning experiment manifest",
+  "title": "Schema-v2 resolved memory-poisoning run manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "experiment_id", "dataset", "memory", "attack", "evaluation", "models"],
+  "required": [
+    "schema_version", "experiment_id", "dataset", "condition", "retrieval",
+    "models", "attack", "controls", "replication"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "experiment_id": {"type": "string", "minLength": 1},
     "dataset": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "revision", "subset", "seed", "events_path", "labels_path"],
+      "required": ["name", "revision", "subset", "events_path", "labels_path", "subset_seed"],
       "properties": {
-        "name": {"enum": ["personamem_v1", "personamem_v2", "mixed", "synthetic"]},
+        "name": {"const": "personamem_v2"},
         "revision": {"type": "string", "minLength": 7},
         "subset": {"type": "string", "minLength": 1},
-        "seed": {"type": "integer"},
         "events_path": {"type": "string", "minLength": 1},
-        "labels_path": {"type": "string", "minLength": 1}
+        "labels_path": {"type": "string", "minLength": 1},
+        "subset_seed": {"type": "integer"}
       }
     },
-    "memory": {
+    "condition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["adapter", "config_ref"],
+      "required": [
+        "comparison_regime", "mechanism", "package_version", "backend",
+        "write_policy", "representation", "update_timing", "config_ref"
+      ],
       "properties": {
-        "adapter": {"enum": ["telemem", "memanto", "langgraph"]},
+        "comparison_regime": {"enum": ["controlled_component", "native_stack"]},
+        "mechanism": {"enum": ["telemem", "memanto", "langgraph"]},
+        "package_version": {"type": "string", "minLength": 1},
+        "backend": {"type": "string", "minLength": 1},
+        "write_policy": {"enum": ["direct", "shared_selective", "native_selective"]},
+        "representation": {"enum": ["collection", "native_typed"]},
+        "update_timing": {"enum": ["hot_path", "end_of_session"]},
         "config_ref": {"type": "string", "minLength": 1}
       }
     },
-    "attack": {
+    "retrieval": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["family", "variant", "budget", "target_policy"],
+      "required": ["mode", "candidate_k", "returned_k", "context_token_budget", "threshold", "rerank"],
       "properties": {
-        "family": {"enum": ["none", "direct_store", "query_only", "cross_user", "indirect_content"]},
-        "variant": {"type": "string"},
-        "budget": {"type": "integer", "minimum": 0},
-        "target_policy": {"type": "string", "minLength": 1}
-      }
-    },
-    "evaluation": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["top_k", "repeats", "judge_config"],
-      "properties": {
-        "top_k": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
-        "repeats": {"type": "integer", "minimum": 1},
-        "judge_config": {"type": "string", "minLength": 1}
+        "mode": {"enum": ["native_semantic", "exact", "hybrid"]},
+        "candidate_k": {"type": "integer", "minimum": 1},
+        "returned_k": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+        "context_token_budget": {"type": "integer", "minimum": 1},
+        "threshold": {"type": ["number", "null"]},
+        "rerank": {"type": "boolean"}
       }
     },
     "models": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["assistant", "embedding"],
+      "required": ["writer", "responder", "embedding", "reranker"],
       "properties": {
-        "assistant": {"type": "string", "minLength": 1},
-        "embedding": {"type": "string", "minLength": 1}
+        "writer": {"$ref": "#/$defs/nullableModel"},
+        "responder": {"$ref": "#/$defs/model"},
+        "embedding": {"$ref": "#/$defs/model"},
+        "reranker": {"$ref": "#/$defs/nullableModel"}
       }
+    },
+    "attack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overlay_registry", "delivery", "payload", "attacker_knowledge",
+        "attack_set", "budget", "target_policy"
+      ],
+      "properties": {
+        "overlay_registry": {"type": "string", "minLength": 1},
+        "delivery": {"enum": ["direct_api", "conversation"]},
+        "payload": {"enum": ["preference_inversion", "ownership_confusion"]},
+        "attacker_knowledge": {"enum": ["black_box", "white_box"]},
+        "attack_set": {"type": "string", "minLength": 1},
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unit", "value"],
+          "properties": {
+            "unit": {"enum": ["record", "interaction"]},
+            "value": {"type": "integer", "minimum": 0}
+          }
+        },
+        "target_policy": {"const": "fixed_before_run"}
+      }
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paired_clean_twin", "matched_benign_overlay", "no_memory_baseline", "full_context_baseline"],
+      "properties": {
+        "paired_clean_twin": {"const": true},
+        "matched_benign_overlay": {"const": true},
+        "no_memory_baseline": {"type": "boolean"},
+        "full_context_baseline": {"type": "boolean"}
+      }
+    },
+    "replication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trial_order_seed", "option_order_seed", "generation_replicates", "fail_fast"],
+      "properties": {
+        "trial_order_seed": {"type": "integer"},
+        "option_order_seed": {"type": "integer"},
+        "generation_replicates": {"type": "integer", "minimum": 1},
+        "fail_fast": {"type": "boolean"}
+      }
+    },
+    "manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "config_ref"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "config_ref": {"type": ["string", "null"]}
+      }
+    },
+    "nullableModel": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/model"}
+      ]
     }
   }
 }

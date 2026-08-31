@@ -1,7 +1,8 @@
-"""Fail-closed validation for normalized experiment data."""
+"""Fail-closed schema-v2 validation for PersonaMem-v2 experiment data."""
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
@@ -15,14 +16,9 @@ _LABEL_ONLY_FIELDS = {
     "incorrect_answers",
     "all_options",
     "rubric",
-    "labels_ref",
+    "strata",
 }
-_PROBE_SPLITS = {
-    "pre_attack_probe",
-    "victim_probe",
-    "recovery_probe",
-    "unrelated_control_probe",
-}
+_PROBE_SPLITS = {"victim_probe", "unrelated_control_probe"}
 
 
 def validate_records(
@@ -33,7 +29,8 @@ def validate_records(
 ) -> list[str]:
     schema_root = Path(schemas_dir)
     event_validator = jsonschema.Draft202012Validator(
-        _load_json(schema_root / "event.schema.json")
+        _load_json(schema_root / "event.schema.json"),
+        format_checker=jsonschema.FormatChecker(),
     )
     label_validator = jsonschema.Draft202012Validator(
         _load_json(schema_root / "label.schema.json")
@@ -55,9 +52,9 @@ def validate_records(
         event_id = event.get("event_id")
         if event_id in event_by_id:
             errors.append(f"event[{index}]: duplicate event_id {event_id!r}")
-        if event_id:
+        if isinstance(event_id, str):
             event_by_id[event_id] = event
-        grouped[str(event.get("experiment_id"))].append(event)
+        grouped[str(event.get("history_unit_id"))].append(event)
 
     label_event_ids: set[str] = set()
     for index, label in enumerate(labels):
@@ -66,50 +63,64 @@ def validate_records(
             for error in label_validator.iter_errors(label)
         )
         event_id = label.get("evaluation_event_id")
-        label_event_ids.add(str(event_id))
+        if isinstance(event_id, str):
+            label_event_ids.add(event_id)
         event = event_by_id.get(event_id)
         if event is None:
             errors.append(
                 f"label[{index}]: evaluation event {event_id!r} does not exist"
             )
-        elif event.get("experiment_id") != label.get("experiment_id") or event.get(
+        elif event.get("history_unit_id") != label.get("history_unit_id") or event.get(
             "persona_id"
         ) != label.get("persona_id"):
             errors.append(
                 f"label[{index}]: label namespace does not match its evaluation event"
             )
 
-    for experiment_id, scenario in grouped.items():
+    for history_unit_id, scenario in grouped.items():
         sequences = [event.get("sequence") for event in scenario]
-        if (
-            any(not isinstance(value, int) for value in sequences)
-            or sequences != sorted(sequences)
-            or len(sequences) != len(set(sequences))
-        ):
+        expected = list(range(len(scenario)))
+        if sequences != expected:
             errors.append(
-                f"experiment {experiment_id!r}: events are not strictly ordered"
+                f"history unit {history_unit_id!r}: sequences must be contiguous and ordered from zero"
             )
-        timestamps = [event.get("timestamp", "") for event in scenario]
-        if timestamps != sorted(timestamps):
-            errors.append(f"experiment {experiment_id!r}: timestamps are not ordered")
         personas = {event.get("persona_id") for event in scenario}
+        revisions = {event.get("source_revision") for event in scenario}
         if len(personas) != 1:
             errors.append(
-                f"experiment {experiment_id!r}: contains multiple persona namespaces"
+                f"history unit {history_unit_id!r}: contains multiple persona namespaces"
+            )
+        if len(revisions) != 1:
+            errors.append(
+                f"history unit {history_unit_id!r}: contains multiple source revisions"
             )
         positions = {event.get("event_id"): event.get("sequence") for event in scenario}
         for event in scenario:
+            event_id = event.get("event_id")
+            split = event.get("split")
+            if split in _PROBE_SPLITS and event.get("allowed_for_memory") is not False:
+                errors.append(f"event {event_id!r}: probes must be read-only")
             if (
-                event.get("split") in _PROBE_SPLITS
-                and event.get("allowed_for_memory") is not False
+                split == "benign_ingestion"
+                and event.get("experimental_topic") is not None
             ):
                 errors.append(
-                    f"event {event.get('event_id')!r}: probes must be read-only"
+                    f"event {event_id!r}: evaluation topic leaked into benign history metadata"
                 )
+            origin = event.get("source_origin")
+            if origin == "dataset" and (
+                event.get("overlay_id") is not None
+                or event.get("overlay_event_id") is not None
+            ):
+                errors.append(f"event {event_id!r}: dataset event has overlay metadata")
+            if origin == "overlay" and (
+                not event.get("overlay_id") or not event.get("overlay_event_id")
+            ):
+                errors.append(f"event {event_id!r}: overlay lineage is incomplete")
             reference = event.get("refers_to_event_id")
             if event.get("operation") == "forget" and not reference:
                 errors.append(
-                    f"event {event.get('event_id')!r}: forget event needs refers_to_event_id"
+                    f"event {event_id!r}: forget event needs refers_to_event_id"
                 )
             for relation in (reference, event.get("supersedes_event_id")):
                 if relation and (
@@ -117,7 +128,7 @@ def validate_records(
                     or positions[relation] >= event.get("sequence", -1)
                 ):
                     errors.append(
-                        f"event {event.get('event_id')!r}: relation {relation!r} must point backward in the same experiment"
+                        f"event {event_id!r}: relation {relation!r} must point backward in the same history unit"
                     )
 
     for event_id, event in event_by_id.items():
@@ -126,6 +137,22 @@ def validate_records(
                 f"event {event_id!r}: evaluation probe has no answer key or rubric"
             )
     return errors
+
+
+def memory_input(event: dict[str, Any]) -> dict[str, Any]:
+    """Return only fields permitted to reach a memory writer."""
+    if not event.get("allowed_for_memory"):
+        raise ValueError(f"event {event.get('event_id')!r} is read-only")
+    return {
+        "event_id": event["event_id"],
+        "persona_id": event["persona_id"],
+        "conversation_id": event["conversation_id"],
+        "turn_id": event["turn_id"],
+        "role": event["role"],
+        "content": event["content"],
+        "operation": event["operation"],
+        "source_record_id": event["source_record_id"],
+    }
 
 
 def ensure_disjoint_personas(
@@ -139,6 +166,4 @@ def ensure_disjoint_personas(
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    import json
-
     return json.loads(path.read_text(encoding="utf-8"))

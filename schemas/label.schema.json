@@ -1,18 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/schemas/label.schema.json",
-  "title": "Private evaluation label",
+  "title": "PersonaMem-v2 evaluator-only label",
   "type": "object",
   "additionalProperties": false,
-  "required": ["experiment_id", "persona_id", "evaluation_event_id", "answer_key"],
+  "required": [
+    "schema_version", "history_unit_id", "persona_id", "evaluation_event_id",
+    "answer_key", "rubric", "incorrect_answers", "strata", "source_record_id"
+  ],
   "properties": {
-    "experiment_id": {"type": "string", "minLength": 1},
-    "persona_id": {"type": "string", "minLength": 1},
+    "schema_version": {"const": 2},
+    "history_unit_id": {"type": "string", "pattern": "^pmv2-"},
+    "persona_id": {"type": "string", "pattern": "^pmv2-p"},
     "evaluation_event_id": {"type": "string", "minLength": 1},
     "answer_key": {"type": "string"},
-    "rubric": {"type": "string"},
+    "rubric": {"type": ["string", "null"]},
     "incorrect_answers": {"type": "array", "items": {"type": "string"}},
-    "preference_type": {"type": "string"},
-    "metadata": {"type": "object"}
+    "strata": {"type": "object"},
+    "source_record_id": {"type": "string", "minLength": 1}
   }
 }

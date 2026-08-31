@@ -1,5 +1,6 @@
 """Dataset curation primitives for reproducible memory experiments."""
 
 from .models import EvaluationLabel, Event
+from .overlays import CompilationResult
 
-__all__ = ["EvaluationLabel", "Event"]
+__all__ = ["CompilationResult", "EvaluationLabel", "Event"]
